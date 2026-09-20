@@ -195,17 +195,27 @@ func (m *Manager) claim(ctx context.Context, kind Kind, defaultTimeout time.Dura
 }
 
 func claimSQL(table string) string {
+	siteOrder := ""
+	if table == "publish_jobs" {
+		// Per-site serialization: an older version must finish before a newer
+		// one is claimed. Jobs already requested for cancellation are excluded;
+		// a PENDING job in retry backoff keeps the newer version waiting until
+		// its next attempt is due, which is the intended serialization.
+		siteOrder = ` AND NOT EXISTS (SELECT 1 FROM publish_jobs older WHERE older.site_id=candidate.site_id
+		AND older.version<candidate.version AND older.cancel_requested_at IS NULL
+		AND older.status IN ('PENDING', 'RUNNING'))`
+	}
 	return fmt.Sprintf(`WITH picked AS (
-		SELECT id FROM %s WHERE cancel_requested_at IS NULL AND attempts<max_attempts
+		SELECT id FROM %s candidate WHERE cancel_requested_at IS NULL AND attempts<max_attempts
 		AND (timeout_at IS NULL OR timeout_at>NOW()) AND ((status='PENDING' AND next_attempt_at<=NOW())
 		OR (status='RUNNING' AND (lease_until IS NULL OR lease_until<=NOW())))
-		ORDER BY next_attempt_at, created_at FOR UPDATE SKIP LOCKED LIMIT 1)
+		%s ORDER BY next_attempt_at, created_at FOR UPDATE SKIP LOCKED LIMIT 1)
 		UPDATE %s j SET status='RUNNING', attempts=attempts+1, lease_owner=$1,
 		lease_until=NOW()+($2*INTERVAL '1 second'), heartbeat_at=NOW(),
 		timeout_at=COALESCE(timeout_at, CASE WHEN $3>0 THEN NOW()+($3*INTERVAL '1 second') END),
 		updated_at=NOW()
 		FROM picked WHERE j.id=picked.id
-		RETURNING j.id, j.attempts, j.max_attempts, j.timeout_at, j.lease_until`, table, table)
+		RETURNING j.id, j.attempts, j.max_attempts, j.timeout_at, j.lease_until`, table, siteOrder, table)
 }
 
 func (m *Manager) sweepIfDue(ctx context.Context, kind Kind, table string) error {
@@ -390,6 +400,8 @@ func (m *Manager) finish(ctx context.Context, lease Lease, outcome Outcome) erro
 	table, _ := tableFor(lease.Kind)
 	status, nextAttempt, message, requeue := outcomeDecision(time.Now().UTC(), lease, outcome)
 	resultJSON := nullableJSON(outcome.Result)
+	// A handler can persist its recovery plan before side effects. An empty
+	// result from a later transient error must not erase that plan.
 	compensationJSON := nullableJSON(outcome.Compensation)
 	return m.db.Tx(ctx, func(tx *client.Client) error {
 		var cancelled bool
@@ -412,7 +424,7 @@ func (m *Manager) finish(ctx context.Context, lease Lease, outcome Outcome) erro
 		}
 		affected, updateErr := tx.RawExec(ctx, fmt.Sprintf(`UPDATE %s SET status=$4,
 			next_attempt_at=$5, lease_owner=NULL, lease_until=NULL, heartbeat_at=NULL,
-			result_json=$6, compensation_json=$7, error=$8,
+			result_json=$6, compensation_json=COALESCE($7, compensation_json), error=$8,
 			attempts=GREATEST(attempts-$9, 0), updated_at=NOW()
 			WHERE id=$1 AND status='RUNNING' AND lease_owner=$2 AND attempts=$3`, table),
 			lease.ID, lease.WorkerID, lease.Attempt, status, nextAttempt, resultJSON, compensationJSON,

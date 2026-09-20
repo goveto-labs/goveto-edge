@@ -95,8 +95,6 @@ func TestKeyLifecycleIntegration(t *testing.T) {
 		_, _ = orm.Cluster.DeleteMany(cleanup, query.Cluster.Id.Equals(quotaCluster.Id))
 	})
 	expiredAt := time.Now().UTC().Add(-time.Hour)
-	expiredPointer := &expiredAt
-	expiredValue := &expiredPointer
 	now := time.Now().UTC()
 	expiredRows := make([]query.ClusterApiKeyCreateInput, MaxKeysPerCluster)
 	for index := range expiredRows {
@@ -104,7 +102,7 @@ func TestKeyLifecycleIntegration(t *testing.T) {
 			Id: uuid.NewString(), ClusterId: quotaCluster.Id, Name: fmt.Sprintf("expired-%03d", index),
 			Prefix: "gve1_expired", TokenHash: fmt.Sprintf("quota-expired-hash-%03d-%s", index, suffix),
 			PermissionsJson: []byte(`["cluster.read"]`), Status: model.ApiKeyStatusACTIVE,
-			ExpiresAt: expiredValue, CreatedBy: user.Id, CreatedAt: now, UpdatedAt: now,
+			ExpiresAt: &expiredAt, CreatedBy: user.Id, CreatedAt: now, UpdatedAt: now,
 		}
 	}
 	if _, err = orm.ClusterApiKey.BulkCreate(expiredRows).BatchSize(MaxKeysPerCluster).Do(ctx); err != nil {

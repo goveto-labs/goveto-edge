@@ -495,9 +495,7 @@ paths:
             tags:
                 - auth
             security:
-                - bearer_api_key: []
                 - cookie_goveto_session: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -12384,6 +12382,10 @@ paths:
                         schema:
                             type: object
                             properties:
+                                initialization_token:
+                                    type: string
+                                    writeOnly: true
+                                    description: One-time operator setup token from INIT_TOKEN or the local secrets file.
                                 agent_gateway_public_address:
                                     type: string
                                 email:
@@ -12393,6 +12395,7 @@ paths:
                                 password:
                                     type: string
                             required:
+                                - initialization_token
                                 - email
                                 - name
             responses:
@@ -12420,6 +12423,28 @@ paths:
                                                 $ref: '#/components/schemas/model_UserStatus'
                 "400":
                     description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "403":
+                    description: invalid initialization token
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "409":
+                    description: instance is already initialized
                     content:
                         application/json:
                             schema:

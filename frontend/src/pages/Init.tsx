@@ -12,6 +12,7 @@ export default function Init() {
     useSystemTheme();
     const navigate = useNavigate();
     const { complete } = useInitialization();
+    const [initializationToken, setInitializationToken] = useState('');
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [agentGatewayPublicAddress, setAgentGatewayPublicAddress] = useState('');
@@ -31,6 +32,7 @@ export default function Init() {
         setLoading(true);
         try {
             await initializationApi.initialize({
+                initialization_token: initializationToken.trim(),
                 name,
                 email,
                 password,
@@ -52,9 +54,9 @@ export default function Init() {
     };
 
     return (
-        <div className='grid h-[100%] bg-background text-foreground'>
+        <div className='grid h-full bg-background text-foreground'>
             <main className='relative flex flex-col overflow-y-auto bg-background px-6 py-12 sm:px-10 lg:px-16'>
-                <div className='mx-auto my-auto w-full max-w-[460px]'>
+                <div className='mx-auto my-auto w-full max-w-115'>
                     <div className='mb-10 flex items-center gap-2.5 lg:hidden'>
                         <div className='flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-accent-foreground'>
                             <Globe aria-hidden='true' className='h-4 w-4' />
@@ -74,6 +76,21 @@ export default function Init() {
                     {error && <FormError className='mb-5' message={error} />}
 
                     <form className='flex flex-col gap-4' onSubmit={handleSubmit}>
+                        <FormField
+                            htmlFor='init-token'
+                            label='Initialization token'
+                            hint='Use the setup token supplied by the instance operator.'
+                            required
+                        >
+                            <Input
+                                autoComplete='off'
+                                id='init-token'
+                                required
+                                type='password'
+                                value={initializationToken}
+                                onChange={(event) => setInitializationToken(event.target.value)}
+                            />
+                        </FormField>
                         <FormField htmlFor='init-name' label='Administrator name' required>
                             <Input
                                 autoFocus

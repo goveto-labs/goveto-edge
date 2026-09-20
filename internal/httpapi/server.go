@@ -67,6 +67,7 @@ func New(
 	dnsService *dnssync.Service,
 	redisClient *redis.Client,
 	securityOptions httpsecurity.Options,
+	initializationToken string,
 	restartControlPlane func(),
 	metricsEnabled bool,
 	analyticsStore ...*analytics.Store,
@@ -109,7 +110,7 @@ func New(
 	if metricsEnabled {
 		metricsapi.Register(e)
 	}
-	initialization.Register(e, orm, settingStore, limiter, authority, gateway)
+	initialization.Register(e, orm, settingStore, limiter, authority, gateway, initializationToken)
 	authapi.Register(e, orm, sessions, settingStore, secretCiphers.General, secretCiphers.TOTP, captchaVerifier, limiter)
 	adminsettings.Register(e, orm, settingStore, secretCiphers.General, authority, gateway, restartControlPlane)
 	clusters.Register(e, orm, sessions, secretCiphers.Notification)

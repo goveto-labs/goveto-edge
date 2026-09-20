@@ -19,7 +19,7 @@ on the [Caddy](https://caddyserver.com/) Go libraries.
   execution history.
 - **Caching.** Request coalescing, stale serving, Range requests, Vary, and
   query/cookie-aware cache keys, implemented as custom Caddy modules.
-- **Security.** WAF (Coraza / OWASP CRS compatible), distributed rate
+- **Security.** Custom rule and regular-expression WAF, distributed rate
   limiting, GeoIP rules, proof-of-work / CAPTCHA challenges, automatic
   banning.
 - **Certificates.** ACME HTTP-01 and DNS-01 issuance, automatic renewal,
@@ -97,9 +97,14 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Open `http://localhost:8080` and follow the instance initialization wizard:
-create an admin account, then add a cluster, install a node and publish your
+The default Compose stack is for local HTTP evaluation and binds its API to
+loopback. Retrieve the setup token with
+`docker compose exec control-api cat /var/lib/goveto-edge/secrets/initialization.token`,
+then open `http://localhost:8080` and follow the instance initialization wizard.
+Create an admin account, then add a cluster, install a node and publish your
 first site.
+
+For remote production use the [HTTPS deployment](deploy/compose/README.md#production-https).
 
 Ports and data:
 

@@ -468,6 +468,45 @@ func loadOrCreateMasterKey(dataDir string) (string, error) {
 	return loadOrCreateNamedMasterKey(dataDir, "node-credential-master.key", "")
 }
 
+// InitializationToken is only loaded while the instance is uninitialized.
+// Supply INIT_TOKEN (or INIT_TOKEN_FILE) identically on multiple replicas.
+// A configured token must be base64-encoded 32 bytes, the same format as
+// master keys.
+func InitializationToken(dataDir string) (string, error) {
+	if token, configured, err := configuredInitializationToken("INIT_TOKEN"); configured || err != nil {
+		return token, err
+	}
+	return loadOrCreateNamedMasterKey(dataDir, "initialization.token", "")
+}
+
+// configuredInitializationToken mirrors configuredKey but validates with
+// token-specific error messages so operators are not pointed at master key
+// configuration.
+func configuredInitializationToken(envName string) (string, bool, error) {
+	if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+		token, err := validateInitializationToken(value, envName)
+		return token, true, err
+	}
+	fileName := strings.TrimSpace(os.Getenv(envName + "_FILE"))
+	if fileName == "" {
+		return "", false, nil
+	}
+	value, err := os.ReadFile(fileName)
+	if err != nil {
+		return "", false, fmt.Errorf("read %s_FILE: %w", envName, err)
+	}
+	token, err := validateInitializationToken(strings.TrimSpace(string(value)), envName+"_FILE")
+	return token, true, err
+}
+
+func validateInitializationToken(value, path string) (string, error) {
+	raw, err := base64.StdEncoding.DecodeString(value)
+	if err != nil || len(raw) != 32 {
+		return "", fmt.Errorf("initialization token in %s must be base64-encoded 32 bytes", path)
+	}
+	return value, nil
+}
+
 func loadOrCreateNamedMasterKey(dataDir, fileName, initialValue string) (string, error) {
 	path := filepath.Join(dataDir, "secrets", fileName)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {

@@ -119,6 +119,12 @@ func (s *encodeSession) drop() {
 	})
 }
 
+func (s *encodeSession) isDropped() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dropped
+}
+
 func (s *encodeSession) finish() error {
 	if s == nil {
 		return nil
@@ -188,9 +194,19 @@ func (w *capturedResponse) startEncode(h *Handler, request *http.Request, header
 	etag := header.Get("ETag")
 	realKey := purgeKey(request)
 	logical := uint64(len(headerBytes)) + size
+	if (w.limit > 0 && size > w.limit) || !w.reserveCapture(logical) {
+		// Same rejection accounting as a saturated encode queue.
+		h.storage.RecordStreamEncodeDrop()
+		if w.bypass != nil {
+			w.bypass(header, status)
+		}
+		w.discardCapture()
+		return
+	}
 	w.encode = startEncodeSession(func(source io.Reader) error {
 		return h.storage.PutReader(baseKey, variedKey, source, logical, groups, varied, etag, ttl, realKey)
 	}, headerBytes, h.storage.RecordStreamEncodeDrop)
+	w.encodeDone = w.encode.done
 }
 
 func (w *capturedResponse) finishEncode() error {

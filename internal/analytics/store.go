@@ -3,23 +3,53 @@ package analytics
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
+
+const livePublishQueueSize = 128
 
 type Store struct {
 	db           *pgxpool.Pool
 	live         *LiveBroker
+	liveRedis    redis.UniversalClient
 	queryTimeout time.Duration
+
+	publishQueue   chan []WebRequestLog
+	publishDone    chan struct{}
+	publishClose   sync.Once
+	publishDropped atomic.Uint64
 }
 
-func NewStore(db *pgxpool.Pool, queryTimeout time.Duration) *Store {
+// NewStore accepts at most one shared Redis client via shared (extra values are
+// ignored). With a client, live logs are delivered asynchronously through Redis
+// streams so every replica sees them; without one the in-process broker is used.
+func NewStore(db *pgxpool.Pool, queryTimeout time.Duration, shared ...redis.UniversalClient) *Store {
 	if queryTimeout <= 0 {
 		queryTimeout = 5 * time.Second
 	}
-	return &Store{db: db, live: NewLiveBroker(), queryTimeout: queryTimeout}
+	store := &Store{db: db, live: NewLiveBroker(), queryTimeout: queryTimeout}
+	if len(shared) > 0 {
+		store.liveRedis = shared[0]
+		store.publishQueue = make(chan []WebRequestLog, livePublishQueueSize)
+		store.publishDone = make(chan struct{})
+		go store.publishWorker()
+	}
+	return store
+}
+
+// Close stops the asynchronous live-log publisher. It is safe to call multiple times.
+func (s *Store) Close() {
+	if s.publishDone == nil {
+		return
+	}
+	s.publishClose.Do(func() { close(s.publishDone) })
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.Ping(ctx) }
@@ -43,10 +73,50 @@ func (s *Store) queryContext(ctx context.Context) (context.Context, context.Canc
 }
 
 func (s *Store) Subscribe(ctx context.Context, filter LiveFilter, buffer int) <-chan LiveRequestLog {
+	if s.liveRedis != nil {
+		events, err := s.SubscribeFrom(ctx, filter, buffer, "")
+		if err == nil {
+			return events
+		}
+		slog.Warn("live log stream subscription failed; falling back to in-process broker", "error", err)
+	}
 	return s.live.Subscribe(ctx, filter, buffer)
 }
 
-func (s *Store) publish(events []WebRequestLog) { s.live.Publish(events) }
+// publish delivers live events without blocking durable ingest: Redis delivery
+// runs on a dedicated worker fed by a bounded queue, and a full queue drops the
+// batch (counted in publishDropped) instead of stalling the caller.
+func (s *Store) publish(events []WebRequestLog) {
+	if s.liveRedis != nil {
+		select {
+		case <-s.publishDone:
+			s.publishDropped.Add(uint64(len(events)))
+			return
+		default:
+		}
+		select {
+		case s.publishQueue <- events:
+		case <-s.publishDone:
+			s.publishDropped.Add(uint64(len(events)))
+		default:
+			dropped := s.publishDropped.Add(uint64(len(events)))
+			slog.Warn("live log publish queue full; dropping batch", "events", len(events), "dropped_total", dropped)
+		}
+		return
+	}
+	s.live.Publish(events)
+}
+
+func (s *Store) publishWorker() {
+	for {
+		select {
+		case <-s.publishDone:
+			return
+		case events := <-s.publishQueue:
+			s.publishShared(events)
+		}
+	}
+}
 
 type continuousAggregateRefreshPolicy struct {
 	view             string

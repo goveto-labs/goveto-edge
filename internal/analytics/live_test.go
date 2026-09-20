@@ -24,3 +24,25 @@ func TestLiveBrokerFiltersEvents(t *testing.T) {
 		t.Fatal("matching live event was not published")
 	}
 }
+
+func TestLiveFilterMatches(t *testing.T) {
+	if !(LiveFilter{}).matches(LiveRequestLog{ClusterID: "any"}) {
+		t.Fatal("empty filter must match every cluster")
+	}
+	if !(LiveFilter{ClusterID: "a", SiteID: "s", NodeID: "n"}).matches(LiveRequestLog{ClusterID: "a", SiteID: "s", NodeID: "n"}) {
+		t.Fatal("exact filter rejected a matching event")
+	}
+	cases := map[string]struct {
+		filter LiveFilter
+		event  LiveRequestLog
+	}{
+		"cluster": {LiveFilter{ClusterID: "a"}, LiveRequestLog{ClusterID: "b"}},
+		"site":    {LiveFilter{ClusterID: "a", SiteID: "s"}, LiveRequestLog{ClusterID: "a", SiteID: "other"}},
+		"node":    {LiveFilter{ClusterID: "a", NodeID: "n"}, LiveRequestLog{ClusterID: "a", NodeID: "other"}},
+	}
+	for name, tc := range cases {
+		if tc.filter.matches(tc.event) {
+			t.Fatalf("%s filter matched a non-matching event", name)
+		}
+	}
+}

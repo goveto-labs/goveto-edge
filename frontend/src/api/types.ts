@@ -22,6 +22,7 @@ export interface RegisterRequest {
 }
 
 export interface InitializeRequest {
+    initialization_token: string;
     email: string;
     password: string;
     name: string;

@@ -86,8 +86,13 @@ func TestApplySitePersistsAndRejectsStaleVersion(t *testing.T) {
 	if stored["site-1"].Version != 1 {
 		t.Fatalf("persisted version: %#v", stored)
 	}
-	if err := manager.ApplySite(config); err == nil || !strings.Contains(err.Error(), "version is not newer") {
-		t.Fatalf("expected stale version error, got %v", err)
+	if err := manager.ApplySite(config); err != nil {
+		t.Fatalf("replayed config: %v", err)
+	}
+	conflict := config
+	conflict.Domains = []string{"conflict.example.com"}
+	if err := manager.ApplySite(conflict); err == nil || !strings.Contains(err.Error(), "different content") {
+		t.Fatalf("expected conflicting version error, got %v", err)
 	}
 	config.Version = 2
 	config.Domains = []string{"updated.example.com"}
@@ -96,6 +101,11 @@ func TestApplySitePersistsAndRejectsStaleVersion(t *testing.T) {
 	}
 	if manager.ConfigVersion() != 2 {
 		t.Fatalf("config version after upgrade: %d", manager.ConfigVersion())
+	}
+	older := config
+	older.Version = 1
+	if err := manager.ApplySite(older); err == nil || !strings.Contains(err.Error(), "version is not newer") {
+		t.Fatalf("expected stale version error, got %v", err)
 	}
 	if err := manager.Stop(); err != nil {
 		t.Fatal(err)
@@ -107,7 +117,31 @@ func TestApplySitePersistsAndRejectsStaleVersion(t *testing.T) {
 	if restored.ConfigVersion() != 2 {
 		t.Fatalf("restored config version: %d", restored.ConfigVersion())
 	}
+	if err := restored.ApplySite(config); err != nil {
+		t.Fatalf("replay after restart: %v", err)
+	}
 	_ = restored.Stop()
+}
+
+func TestApplySiteSameVersionMarshalFailureRejectsConservatively(t *testing.T) {
+	ensureAgentLogSink(t)
+	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), ":"+strconv.Itoa(freePort(t)))
+	config := validHTTPConfig(t)
+	if err := manager.ApplySite(config); err != nil {
+		t.Fatalf("apply site: %v", err)
+	}
+	config.Cache = map[string]any{"unmarshalable": func() {}}
+	err := manager.ApplySite(config)
+	if err == nil || !strings.Contains(err.Error(), "marshal current") {
+		t.Fatalf("expected marshal failure error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "different content") {
+		t.Fatalf("marshal failure reported as content conflict: %v", err)
+	}
+	if versions := manager.SiteVersions(); versions["site-1"] != 1 {
+		t.Fatalf("site versions after rejection: %#v", versions)
+	}
+	_ = manager.Stop()
 }
 
 func TestSiteVersionsOmitsPersistedTombstones(t *testing.T) {
@@ -1082,7 +1116,7 @@ func TestDeliverySplitRouteKeepsPoolPathConstraint(t *testing.T) {
 		"load_balancing": map[string]any{},
 		"transport":      map[string]any{"protocol": "goveto_http"},
 	}
-	routes, err := deliveryPoolRoutes(site, policy, nil, baseProxy, edgeprotocol.DefaultOriginPolicy())
+	routes, err := deliveryPoolRoutes(site, policy, nil, baseProxy, edgeprotocol.DefaultOriginPolicy(), map[string]any{"handler": "goveto_origin_metrics", "site_id": site.SiteID}, defaultNodeConfig())
 	if err != nil {
 		t.Fatal(err)
 	}

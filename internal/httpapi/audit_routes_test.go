@@ -54,7 +54,7 @@ func collectRegisteredMutations(t *testing.T) map[string]bool {
 		return nil
 	}
 	health.Register(e, nil)
-	initialization.Register(e, nil, nil, nil, nil, nil)
+	initialization.Register(e, nil, nil, nil, nil, nil, "")
 	authapi.Register(e, nil, nil, nil, nil, nil, nil, nil)
 	adminsettings.Register(e, nil, nil, nil, nil, nil, nil)
 	clusters.Register(e, nil, nil)

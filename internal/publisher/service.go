@@ -29,14 +29,21 @@ import (
 	"goveto-edge/internal/storage/gen/query"
 )
 
+// Dispatcher pushes a task to an edge node. It is an interface so tests can
+// substitute a fake; note that a typed nil (e.g. a nil *edgecontrol.Gateway)
+// stored here is a non-nil interface and panics on Dispatch.
+type Dispatcher interface {
+	Dispatch(context.Context, string, string, any, any) error
+}
+
 type Service struct {
 	db                *client.Client
 	certificateCipher *node.CredentialCipher
 	derivationCipher  *node.CredentialCipher
 	configSecrets     *configseal.Sealer
-	gateway           *edgecontrol.Gateway
-	jobs              *jobqueue.Manager
-	concurrency       int
+	gateway           Dispatcher
+	jobs        *jobqueue.Manager
+	concurrency int
 }
 
 type EnqueueMode string
@@ -253,22 +260,25 @@ func (s *Service) EnqueueIdempotentDetailed(ctx context.Context, siteID, idempot
 			return fmt.Errorf("site %s not found", siteID)
 		}
 
-		pending, pendingErr := tx.PublishJob.Query().
-			Where(
-				query.PublishJob.SiteId.Equals(siteID),
-				query.PublishJob.Status.Equals(model.JobStatusPENDING),
-			).
-			OrderBy(query.PublishJob.CreatedAt.Desc()).
-			First(ctx)
+		// Lock the pending job as well: the queue claim must not dispatch
+		// this snapshot while it is being coalesced with a newer edit.
+		pendingRows, pendingErr := client.Raw[model.PublishJob](ctx, tx, `SELECT * FROM publish_jobs
+			WHERE site_id=$1 AND status='PENDING' AND attempts=0 AND compensation_json IS NULL
+			ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, siteID)
 		if pendingErr != nil {
 			return pendingErr
+		}
+		var pending *model.PublishJob
+		if len(pendingRows) > 0 {
+			pending = &pendingRows[0]
 		}
 		var running *model.PublishJob
 		if pending == nil {
 			running, err = tx.PublishJob.Query().
 				Where(
 					query.PublishJob.SiteId.Equals(siteID),
-					query.PublishJob.Status.Equals(model.JobStatusRUNNING),
+					query.PublishJob.Status.In(model.JobStatusRUNNING, model.JobStatusPENDING),
+					query.PublishJob.CompensationJson.IsNull(),
 				).
 				OrderBy(query.PublishJob.CreatedAt.Desc()).
 				First(ctx)
@@ -636,7 +646,16 @@ type targetResult struct {
 	Error      string `json:"error,omitempty"`
 }
 
-func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.Outcome {
+func (s *Service) executeLocked(ctx context.Context, job *model.PublishJob) jobqueue.Outcome {
+	if job.CompensationJson != nil {
+		var plan rollbackPlan
+		if err := json.Unmarshal(*job.CompensationJson, &plan); err != nil {
+			return publishOutcome(model.JobStatusFAILED, nil, err, false)
+		}
+		if plan.Version > 0 {
+			return s.finishRollback(ctx, job, plan)
+		}
+	}
 	site, err := s.db.Site.FindUnique(ctx, query.Site.Id.Equals(job.SiteId))
 	if err != nil {
 		return publishOutcome(model.JobStatusFAILED, nil, err, true)
@@ -715,23 +734,30 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.O
 		)
 	}
 
-	rollbackVersion := job.Version + 1
-	// Match prune and the jobs baseline view: after compensation the live
-	// snapshot is ROLLED_BACK, and the original PUBLISHED row may already
-	// have been pruned. Looking only at PUBLISHED would tombstone the site.
-	previous, previousErr := s.db.ConfigVersion.Query().
-		Where(
-			query.ConfigVersion.SiteId.Equals(site.Id),
-			query.ConfigVersion.Status.In(model.ConfigStatusPUBLISHED, model.ConfigStatusROLLED_BACK),
-			query.ConfigVersion.Version.Lt(job.Version),
-		).
-		OrderBy(query.ConfigVersion.Version.Desc()).
-		First(ctx)
-	if previousErr != nil {
-		return publishOutcome(model.JobStatusFAILED, results, previousErr, true)
+	plan, err := s.reserveRollback(ctx, job, results, succeeded)
+	if err != nil {
+		return publishOutcome(model.JobStatusFAILED, results, err, true)
 	}
-	rollback := s.rollbackSnapshot(site.Id, rollbackVersion, previous)
+	return s.finishRollback(ctx, job, plan)
+}
 
+func (s *Service) finishRollback(ctx context.Context, job *model.PublishJob, plan rollbackPlan) (outcome jobqueue.Outcome) {
+	defer func() { outcome.Compensation = plan }()
+	version, err := s.db.ConfigVersion.Query().Where(
+		query.ConfigVersion.SiteId.Equals(job.SiteId), query.ConfigVersion.Version.Equals(plan.Version),
+	).First(ctx)
+	if err != nil || version == nil {
+		if err == nil {
+			err = errors.New("reserved rollback snapshot not found")
+		}
+		return rollbackOutcome(plan.Results, err, true)
+	}
+	rollback, err := s.decodeStoredConfig(version.ConfigJson)
+	if err != nil {
+		return publishOutcome(model.JobStatusFAILED, plan.Results, err, false)
+	}
+	site := &model.Site{Id: job.SiteId}
+	rollbackVersion, results, succeeded := plan.Version, plan.Results, plan.Targets
 	rollbackResults := s.fanout(ctx, rollback, succeeded)
 	for index := range results {
 		for _, rolled := range rollbackResults {
@@ -744,8 +770,6 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.O
 		}
 	}
 
-	rollbackJSON := s.persistableRollbackJSON(rollback)
-	rollbackHash := sha256.Sum256(rollbackJSON)
 	rollbackComplete := allSucceeded(rollbackResults)
 	if _, err = s.db.ConfigVersion.Update().
 		Where(
@@ -755,7 +779,7 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.O
 		Set(query.ConfigVersion.Status.Set(model.ConfigStatusFAILED)).
 		DoMany(ctx); err != nil {
 		s.recordRollback(ctx, site.Id, job.Version, rollbackVersion, results, rollbackResults, rollbackComplete, err)
-		return publishOutcome(model.JobStatusFAILED, results, err, true)
+		return rollbackOutcome(results, err, true)
 	}
 
 	rollbackStatus := model.ConfigStatusFAILED
@@ -763,17 +787,10 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.O
 		rollbackStatus = model.ConfigStatusROLLED_BACK
 	}
 
-	if _, err = s.db.ConfigVersion.Create().
-		Set(
-			query.ConfigVersion.SiteId.Set(site.Id),
-			query.ConfigVersion.Version.Set(rollbackVersion),
-			query.ConfigVersion.ConfigJson.Set(rollbackJSON),
-			query.ConfigVersion.Hash.Set(hex.EncodeToString(rollbackHash[:])),
-			query.ConfigVersion.Status.Set(rollbackStatus),
-		).
-		Do(ctx); err != nil {
-		s.recordRollback(ctx, site.Id, job.Version, rollbackVersion, results, rollbackResults, rollbackComplete, err)
-		return publishOutcome(model.JobStatusFAILED, results, err, true)
+	if _, err = s.db.ConfigVersion.Update().Where(
+		query.ConfigVersion.SiteId.Equals(site.Id), query.ConfigVersion.Version.Equals(rollbackVersion),
+	).Set(query.ConfigVersion.Status.Set(rollbackStatus)).DoMany(ctx); err != nil {
+		return rollbackOutcome(results, err, true)
 	}
 
 	if rollbackComplete {
@@ -782,15 +799,17 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.O
 			Set(query.Site.Version.Set(rollbackVersion)).
 			Do(ctx); err != nil {
 			s.recordRollback(ctx, site.Id, job.Version, rollbackVersion, results, rollbackResults, rollbackComplete, err)
-			return publishOutcome(model.JobStatusFAILED, results, err, true)
+			return rollbackOutcome(results, err, true)
 		}
 	}
 
 	for _, rolled := range rollbackResults {
 		if rolled.Success {
-			_ = s.setNodeVersion(
+			if err := s.setNodeVersion(
 				ctx, rolled.NodeID, site.Id, rollbackVersion, model.ConfigStatusROLLED_BACK,
-			)
+			); err != nil {
+				return rollbackOutcome(results, err, true)
+			}
 		}
 	}
 
@@ -973,6 +992,15 @@ func publishOutcome(status model.JobStatus, results any, executionErr error, ret
 	}
 	return jobqueue.Outcome{Result: result, Compensation: compensation, Err: executionErr, Retryable: retryable}
 }
+
+// The persisted compensation plan makes retries after a database failure safe:
+// they resume the reserved rollback instead of redispatching the failed config.
+func rollbackOutcome(results []targetResult, executionErr error, retryable bool) jobqueue.Outcome {
+	outcome := publishOutcome(model.JobStatusFAILED, results, executionErr, false)
+	outcome.Retryable = retryable
+	return outcome
+}
+
 func errorString(err error) string {
 	if err == nil {
 		return ""

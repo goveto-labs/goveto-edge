@@ -107,6 +107,7 @@ func Stats(path string) Statistics {
 		result.Evictions += provider.evictions.Load()
 		result.RejectedWrites += provider.rejections.Load()
 		result.StreamEncodeDrops += provider.streamEncodeDrops.Load()
+		result.CaptureRejections += provider.captureRejections.Load()
 		result.Corruptions += provider.corruptions.Load()
 		result.WriteQueueDepth += provider.queueDepth.Load()
 		result.WriteQueueBytes += provider.queueBytes.Load()
@@ -417,6 +418,7 @@ type Statistics struct {
 	Evictions             uint64  `json:"evictions"`
 	RejectedWrites        uint64  `json:"rejected_writes"`
 	StreamEncodeDrops     uint64  `json:"stream_encode_drops"`
+	CaptureRejections     uint64  `json:"capture_rejections"`
 	Corruptions           uint64  `json:"corruptions"`
 	HitRate               float64 `json:"hit_rate"`
 	WriteQueueDepth       uint64  `json:"write_queue_depth"`
@@ -466,6 +468,9 @@ func diskUsageForProvider(path string) diskUsageFunc {
 type provider struct {
 	mu                sync.RWMutex
 	capacityMu        sync.Mutex
+	captureBytes      uint64 // capacityMu; origin/encoder staging bytes held by ReserveCapture admission
+	captureUsage      *disk.UsageStat // capacityMu; last admission disk snapshot
+	captureUsageAt    time.Time       // capacityMu; when captureUsage was read
 	operationMu       sync.RWMutex
 	batchMu           sync.Mutex
 	batchCond         *sync.Cond
@@ -510,6 +515,7 @@ type provider struct {
 	commitNanos       atomic.Uint64
 	inflightWrites    atomic.Uint64
 	streamEncodeDrops atomic.Uint64
+	captureRejections atomic.Uint64
 	nextVersion       uint64
 	refs              int
 }
@@ -1630,12 +1636,19 @@ func (p *provider) capacityAvailable(configured limits, transient uint64) (capac
 	if err != nil {
 		return capacityBudget{}, err
 	}
+	return p.capacityAvailableWithUsage(configured, transient, usage), nil
+}
+
+func (p *provider) capacityAvailableWithUsage(configured limits, transient uint64, usage *disk.UsageStat) capacityBudget {
 	budget := capacityBudget{
 		accountedUsed: p.cacheUsed.Load(), physicalUsed: p.physicalUsed.Load(),
 		accountedAvailable: ^uint64(0),
 	}
 	target := usage.Total * uint64(normalizePercent(configured.maxDiskUsagePercent)) / 100
 	nonCacheUsed := uint64(0)
+	// Capture reservations include bytes that may not have been written yet.
+	// Never subtract them from measured disk usage: that would turn an
+	// unwritten reservation into fictitious free space for the next capture.
 	trackedAndTransient := budget.physicalUsed + transient
 	if usage.Used > trackedAndTransient {
 		nonCacheUsed = usage.Used - trackedAndTransient
@@ -1646,7 +1659,38 @@ func (p *provider) capacityAvailable(configured limits, transient uint64) (capac
 	if !configured.auto && configured.maxBytes > 0 {
 		budget.accountedAvailable = configured.maxBytes
 	}
-	return budget, nil
+	// Capture reservations are deliberately NOT deducted here. They are
+	// enforced at the ReserveCapture admission gate (storage.go), which is
+	// what keeps concurrent captures from oversubscribing capacity. Normal
+	// writes must not be squeezed by reserved-but-unwritten bytes: staged
+	// bytes already on disk are visible through usage.Used above, and the
+	// unwritten remainder may never materialize (aborted or discarded
+	// captures), so deducting it here would reject or over-evict legitimate
+	// writes on phantom pressure.
+	return budget
+}
+
+// captureUsageTTL bounds how long ReserveCapture admission reuses one disk
+// usage snapshot. Capture reservations grow with every body chunk on the
+// write hot path, so each admission cannot afford a fresh statfs. Staleness
+// only makes physical admission optimistic for one window — a statfs snapshot
+// is inherently stale by the time it is acted on anyway — while the
+// captureBytes accounting itself is always exact under capacityMu.
+const captureUsageTTL = 100 * time.Millisecond
+
+// captureDiskUsageLocked returns a disk usage snapshot for capture admission,
+// reusing the previous one while it is younger than captureUsageTTL.
+// capacityMu must be held.
+func (p *provider) captureDiskUsageLocked() (*disk.UsageStat, error) {
+	if p.captureUsage != nil && time.Since(p.captureUsageAt) < captureUsageTTL {
+		return p.captureUsage, nil
+	}
+	usage, err := p.diskUsage(p.path)
+	if err != nil {
+		return nil, err
+	}
+	p.captureUsage, p.captureUsageAt = usage, time.Now()
+	return usage, nil
 }
 
 func withinAutoLimit(total, used, incoming uint64, percent int) bool {

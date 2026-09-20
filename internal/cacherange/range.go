@@ -24,3 +24,10 @@ func FromContext(ctx context.Context) (Spec, bool) {
 	spec, ok := ctx.Value(contextKey{}).(Spec)
 	return spec, ok
 }
+
+// WithoutRange defers range selection until response validators are known.
+// The placeholder is deliberately not a Spec: the type assertion in
+// FromContext then reports ok=false, marking the range as undecided.
+func WithoutRange(ctx context.Context) context.Context {
+	return context.WithValue(ctx, contextKey{}, struct{}{})
+}

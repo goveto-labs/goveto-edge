@@ -424,11 +424,7 @@ func TestFetchAndServeStreamsBeforeOriginCompletes(t *testing.T) {
 }
 
 func TestFetchAndServeBuffersWhileStaleFallbackIsPossible(t *testing.T) {
-	storage, err := simplefs.Acquire(simplefs.Config{Path: t.TempDir(), MaxSizeBytes: 1 << 20}, zap.NewNop().Sugar())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = storage.Close() })
+	storage, _ := newTestCache(t)
 
 	releaseOrigin := make(chan struct{})
 	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {

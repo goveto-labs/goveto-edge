@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 	core "goveto-edge/internal/cachecore"
+	"goveto-edge/internal/cacherange"
 )
 
 type Config struct {
@@ -113,6 +114,24 @@ func (s *Storage) LookupEntry(key string, request *http.Request) (fresh, stale *
 	return fresh, stale, metadata
 }
 
+// LookupEntryFull leaves range selection to the handler after revalidation
+// and client preconditions have been evaluated.
+func (s *Storage) LookupEntryFull(key string, request *http.Request) (fresh, stale *http.Response, metadata LookupMetadata) {
+	lookup := request.WithContext(cacherange.WithoutRange(request.Context()))
+	fresh, stale, metadata = s.LookupEntry(key, lookup)
+	if fresh != nil {
+		fresh.Request = request
+	}
+	if stale != nil {
+		stale.Request = request
+	}
+	return
+}
+
+func ApplyRange(response *http.Response, requested cacherange.Spec) error {
+	return applyCachedRange(response, requested)
+}
+
 func (s *Storage) Put(baseKey, variedKey string, response []byte, varied http.Header, etag string, ttl time.Duration, realKey string) error {
 	if s == nil || s.provider == nil {
 		return errors.New("cache storage is closed")
@@ -135,6 +154,48 @@ func (s *Storage) RecordStreamEncodeDrop() {
 	// WRITE_REJECTED alert. queueRejections only counts batch queue saturation.
 	s.provider.streamEncodeDrops.Add(1)
 	s.provider.rejections.Add(1)
+}
+
+// ReserveCapture accounts temporary origin bytes against the same provider
+// budget as committed objects. It never evicts objects to buffer a response.
+// Held reservations gate admission here — and only here — so concurrent
+// captures cannot oversubscribe capacity, while normal cache writes
+// (capacityAvailable) are never rejected by reserved-but-unwritten bytes.
+// Admission runs on the per-chunk write hot path, so the disk usage snapshot
+// is reused within captureUsageTTL instead of statfs-ing every call.
+func (s *Storage) ReserveCapture(bytes uint64) bool {
+	if s == nil || s.provider == nil {
+		return false
+	}
+	p := s.provider
+	p.capacityMu.Lock()
+	defer p.capacityMu.Unlock()
+	usage, err := p.captureDiskUsageLocked()
+	if err != nil {
+		p.captureRejections.Add(1)
+		return false
+	}
+	budget := p.capacityAvailableWithUsage(p.limits, 0, usage)
+	accountedFree := budget.accountedAvailable - min(budget.accountedAvailable, budget.accountedUsed)
+	physicalFree := budget.physicalAvailable - min(budget.physicalAvailable, budget.physicalUsed)
+	accountedFree -= min(accountedFree, p.captureBytes)
+	physicalFree -= min(physicalFree, p.captureBytes)
+	if bytes > accountedFree || bytes > physicalFree {
+		p.captureRejections.Add(1)
+		return false
+	}
+	p.captureBytes += bytes
+	return true
+}
+
+func (s *Storage) ReleaseCapture(bytes uint64) {
+	if s == nil || s.provider == nil {
+		return
+	}
+	p := s.provider
+	p.capacityMu.Lock()
+	p.captureBytes -= min(p.captureBytes, bytes)
+	p.capacityMu.Unlock()
 }
 
 func (s *Storage) Refresh(baseKey string, request *http.Request, ttl time.Duration, update http.Header) bool {

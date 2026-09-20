@@ -1,6 +1,7 @@
 package edgeagent
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/base64"
@@ -136,7 +137,25 @@ func (m *ConfigManager) ApplySite(config SiteConfig) error {
 	defer m.mu.Unlock()
 
 	previous, existed := m.sites[config.SiteID]
-	if existed && config.Version <= previous.Version {
+	if existed && config.Version == previous.Version {
+		// Delivery is at least once. Compare the JSON representation so map
+		// ordering and numeric types after a restart do not change identity.
+		currentJSON, currentErr := json.Marshal(config)
+		previousJSON, previousErr := json.Marshal(previous)
+		if currentErr != nil || previousErr != nil {
+			// The content cannot be compared; reject conservatively and keep
+			// the underlying marshal error instead of blaming the content.
+			return fmt.Errorf("compare site config version %d: marshal current: %v; marshal previous: %v", config.Version, currentErr, previousErr)
+		}
+		if bytes.Equal(currentJSON, previousJSON) {
+			// Same version and content: accept the duplicate delivery without
+			// re-applying the Caddy config. This intentionally does not
+			// self-heal drift caused by an external Caddy reload.
+			return nil
+		}
+		return errors.New("site config version already exists with different content")
+	}
+	if existed && config.Version < previous.Version {
 		return errors.New("site config version is not newer")
 	}
 
@@ -794,8 +813,7 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			routes = append(routes, deliveryCORSRoute(site, deliveryPolicy))
 		}
 		if deliveryConfigured && (len(deliveryPolicy.Splits) > 0 || len(deliveryPolicy.OriginPools) > 0) {
-			poolHandlers := append(append([]any{}, handlers...), originMetrics)
-			poolRoutes, routeErr := deliveryPoolRoutes(site, deliveryPolicy, poolHandlers, reverseProxy, originPolicy)
+			poolRoutes, routeErr := deliveryPoolRoutes(site, deliveryPolicy, handlers, reverseProxy, originPolicy, originMetrics, nodeConfig)
 			if routeErr != nil {
 				return nil, fmt.Errorf("site %s delivery pools: %w", id, routeErr)
 			}
@@ -805,7 +823,6 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 		if cachePolicy, ok, err := decodeCachePolicy(site.Cache); err != nil {
 			return nil, fmt.Errorf("site %s cache policy: %w", id, err)
 		} else if ok && len(cachePolicy.Rules) > 0 && !cachePolicy.DevMode {
-			methods := cachePolicy.Methods
 			for ruleIndex, rule := range cachePolicy.Rules {
 				cachedHandlers := append([]any(nil), handlers...)
 				cachedHandlers = append(cachedHandlers,
@@ -813,18 +830,8 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 					originMetrics, reverseProxy,
 				)
 				routes = append(routes, map[string]any{
-					"@id": "site_" + id + "_cache_" + strconv.Itoa(ruleIndex),
-					"match": []any{
-						map[string]any{
-							"host":   site.Domains,
-							"method": methods,
-							"goveto_cache": map[string]any{
-								"conditions":           rule.Conditions,
-								"cache_range_requests": cachePolicy.CacheRangeRequests,
-								"bypass_cache_control": cachePolicy.BypassCacheControl,
-							},
-						},
-					},
+					"@id":      "site_" + id + "_cache_" + strconv.Itoa(ruleIndex),
+					"match":    []any{govetoCacheMatcher(site.Domains, cachePolicy, rule)},
 					"handle":   cachedHandlers,
 					"terminal": true,
 				})
@@ -982,6 +989,21 @@ func decodeWAFPolicy(raw map[string]any, geoIPPath string, validateGeoIP func() 
 		policy.GeoIPDatabase = geoIPPath
 	}
 	return policy, true, nil
+}
+
+func govetoCacheMatcher(hosts []string, cachePolicy cachepolicy.CachePolicy, rule cachepolicy.CacheRule) map[string]any {
+	matcher := map[string]any{
+		"method": cachePolicy.Methods,
+		"goveto_cache": map[string]any{
+			"conditions":           rule.Conditions,
+			"cache_range_requests": cachePolicy.CacheRangeRequests,
+			"bypass_cache_control": cachePolicy.BypassCacheControl,
+		},
+	}
+	if len(hosts) > 0 {
+		matcher["host"] = hosts
+	}
+	return matcher
 }
 
 func govetoCacheHandler(siteID string, cachePolicy cachepolicy.CachePolicy, rule cachepolicy.CacheRule, nodeConfig NodeConfig) map[string]any {

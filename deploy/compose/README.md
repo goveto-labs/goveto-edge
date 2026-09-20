@@ -12,15 +12,51 @@ docker compose up -d
 The stack runs TimescaleDB (control + analytics database), Redis (sessions,
 rate limiting, cache) and the control plane with the console SPA and both
 edge-agent architectures embedded. Open `http://localhost:8080` and follow the
-instance initialization wizard.
+instance initialization wizard. The default is local evaluation: HTTP binds
+to `127.0.0.1`, `APP_ENV=development`, and cookies may use HTTP. For a remote
+machine use an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 user@host`) or the HTTPS
+deployment below; do not expose evaluation HTTP to the public network.
+
+Retrieve the one-time setup token locally, then enter it in the wizard:
+
+```bash
+docker compose exec control-api cat /var/lib/goveto-edge/secrets/initialization.token
+```
+
+The token is stored with mode `0600`, is never returned by the public API,
+and cannot initialize an already configured instance. With multiple replicas,
+supply the same `INIT_TOKEN` (base64 encoding of 32 random bytes) or
+`INIT_TOKEN_FILE` to each replica during setup and remove it afterward.
+
+## Production HTTPS
+
+Point a public hostname at this host, allow inbound TCP 80/443 (UDP 443 for
+HTTP/3), and set `CONSOLE_DOMAIN=console.example.com` in `.env`. Start the
+included TLS proxy:
+
+```bash
+docker compose -f compose.yaml -f compose.https.yaml up -d
+```
+
+Caddy obtains and renews the console certificate. Open
+`https://console.example.com`, complete initialization using the token above,
+and sign in. Verify that `/api/v1/auth/me` succeeds after a reload and that
+the session cookie has `Secure` set. The production overlay forces
+`APP_ENV=production` and `SESSION_COOKIE_SECURE=true`; setting the latter to
+false cannot override the production requirement. Port 8080 remains bound
+only to loopback. Keep the separate mTLS agent gateway on 8443 reachable by
+edge nodes. Persist `console-tls-data` along with the other volumes.
 
 Requirements:
 
 - Ports: 8080 (console + API), 8443 (mTLS agent gateway) must be reachable
-  from edge nodes.
-- Data: named volumes `pgdata`, `redisdata`, `goveto-data`. Back up `pgdata`
-  and `goveto-data`; losing `goveto-data` loses the generated master keys (see
-  below).
+  from edge nodes as needed; expose the API over HTTPS in production.
+- Data: named volumes `pgdata`, `redisdata`, `goveto-data`, plus
+  `console-tls-data` and `console-tls-config` when the HTTPS overlay is used.
+  Back up `pgdata` and `goveto-data`; losing `goveto-data` loses the
+  generated master keys (see below). Losing `console-tls-data` or
+  `console-tls-config` makes Caddy reissue the console certificate, which can
+  hit ACME rate limits.
 - Upgrades: set `GOVETO_IMAGE_TAG` to the new release tag and
   `docker compose up -d`. Database schema changes are applied on startup.
 

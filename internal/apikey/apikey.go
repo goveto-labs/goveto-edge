@@ -73,7 +73,7 @@ var (
 	ErrInvalidGrace         = errors.New("api key rotation grace is out of range")
 )
 
-const apiKeyNameConstraint = "cluster_api_keys_cluster_id_name_key"
+const apiKeyNameConstraint = "uq_cluster_api_keys_cluster_id_name"
 
 // Service verifies tokens and manages the key lifecycle.
 type Service struct {
@@ -410,7 +410,7 @@ func (s *Service) Verify(ctx context.Context, token string) (*model.ClusterApiKe
 		k.previous_token_hash, k.previous_expires_at, k.permissions_json,
 		k.status, k.expires_at, k.revoked_at, k.last_used_at, k.last_used_ip,
 		k.created_by, k.created_at, k.updated_at,
-		COALESCE(u.status, '') AS creator_status,
+		COALESCE(u.status::text, '') AS creator_status,
 		COALESCE(k.previous_token_hash = $1, FALSE) AS matched_previous
 		FROM cluster_api_keys AS k
 		LEFT JOIN users AS u ON u.id = k.created_by
@@ -470,7 +470,7 @@ func requireActiveCreator(ctx context.Context, db *client.Client, userID string)
 func isNameConflict(err error) bool {
 	var postgresError *pgconn.PgError
 	return errors.As(err, &postgresError) && postgresError.Code == "23505" &&
-		postgresError.ConstraintName == apiKeyNameConstraint
+		(postgresError.ConstraintName == apiKeyNameConstraint || postgresError.ConstraintName == "cluster_api_keys_cluster_id_name_key")
 }
 
 // Touch records usage asynchronously and reserves one write per key per

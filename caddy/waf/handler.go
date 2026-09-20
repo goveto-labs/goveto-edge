@@ -88,11 +88,12 @@ type compiledCondition struct {
 }
 
 type requestData struct {
-	request *http.Request
-	body    string
-	ip      string
-	country string
-	region  string
+	request    *http.Request
+	body       string
+	bodyValues []requestCandidate
+	ip         string
+	country    string
+	region     string
 }
 
 type wafDecision struct {
@@ -249,6 +250,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		}
 	}
 	if h.WAF.Enabled && h.inspectBody && r.Body != nil {
+		if encoding := strings.TrimSpace(r.Header.Get("Content-Encoding")); encoding != "" && !strings.EqualFold(encoding, "identity") {
+			w.Header().Set("Cache-Control", "private, no-store")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			setSecurityEvent(w.Header(), "BLOCK", "request-body-encoding", "body_inspection", "unsupported_content_encoding")
+			http.Error(w, "unsupported request body encoding", http.StatusUnsupportedMediaType)
+			return nil
+		}
 		limit := h.WAF.BodyInspectLimitBytes
 		body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 		if err != nil {
@@ -274,6 +282,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			data.body = string(body)
 		}
+		data.bodyValues = decodedBodyCandidates(r.Header.Get("Content-Type"), data.body)
 	}
 
 	if h.WAF.Enabled {
@@ -823,7 +832,20 @@ func requestValues(condition policy.WAFCondition, data requestData) []requestCan
 		}
 		return single("COOKIE:"+condition.FieldName, "")
 	case "BODY":
-		return single("BODY", data.body)
+		if condition.FieldName == "" {
+			return append(single("BODY", data.body), data.bodyValues...)
+		}
+		// Field-scoped rules inspect only the decoded values of that field,
+		// like the QUERY branch. JSON bodies flatten every string under the
+		// "json" name, so they match only when FieldName is "json".
+		name := "BODY:" + condition.FieldName
+		result := make([]requestCandidate, 0, len(data.bodyValues))
+		for _, candidate := range data.bodyValues {
+			if candidate.name == name {
+				result = append(result, candidate)
+			}
+		}
+		return result
 	case "CLIENT_IP":
 		return single("CLIENT_IP", data.ip)
 	case "USER_AGENT":

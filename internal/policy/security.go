@@ -421,8 +421,12 @@ func normalizeWAFCondition(condition *WAFCondition, location string) error {
 		condition.Values[index] = strings.TrimSpace(condition.Values[index])
 	}
 	switch condition.Field {
-	case "METHOD", "HOST", "PATH", "RAW_QUERY", "QUERY_VALUES", "REQUEST_TARGET", "BODY", "CLIENT_IP", "USER_AGENT", "COUNTRY", "REGION":
+	case "METHOD", "HOST", "PATH", "RAW_QUERY", "QUERY_VALUES", "REQUEST_TARGET", "CLIENT_IP", "USER_AGENT", "COUNTRY", "REGION":
 		condition.FieldName = ""
+	case "BODY":
+		// FieldName is optional: empty inspects the raw body plus every
+		// decoded field; set it to scope the rule to one decoded field.
+
 	case "QUERY", "COOKIE":
 		if condition.FieldName == "" {
 			return fmt.Errorf("%s.field_name is required for %s", location, condition.Field)

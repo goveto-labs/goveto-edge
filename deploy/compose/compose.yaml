@@ -1,7 +1,9 @@
-# Goveto Edge control plane - single-host production stack.
+# Goveto Edge control plane - local evaluation stack.
+# For production TLS, add compose.https.yaml (see README.md).
 #
 # Prerequisites:
-#   cp .env.example .env   # then set NODE_CREDENTIAL_MASTER_KEY and passwords
+#   cp .env.example .env   # then set POSTGRES_PASSWORD (and
+#                          # NODE_CREDENTIAL_MASTER_KEY for multi-replica)
 #
 # Start:
 #   docker compose up -d
@@ -58,7 +60,7 @@ services:
     env_file:
       - .env
     environment:
-      APP_ENV: production
+      APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: postgresql://goveto@db:5432/goveto?sslmode=disable
       PGPASSWORD: ${POSTGRES_PASSWORD}
       REDIS_URL: redis://redis:6379/0
@@ -67,7 +69,7 @@ services:
       # TimescaleDB enabled). Split it out by pointing it at a dedicated
       # TimescaleDB instance in .env.
     ports:
-      - "${HTTP_PUBLISH_PORT:-8080}:8080"
+      - "${HTTP_PUBLISH_HOST:-127.0.0.1}:${HTTP_PUBLISH_PORT:-8080}:8080"
       - "${AGENT_GATEWAY_PUBLISH_PORT:-8443}:8443"
     volumes:
       - goveto-data:/var/lib/goveto-edge

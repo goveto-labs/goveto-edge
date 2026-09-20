@@ -63,7 +63,7 @@ func collectRegisteredRoutes(t *testing.T) map[routeKey]bool {
 	// /metrics is registered only when metrics are enabled (server.go), but the
 	// specification documents it, so include it in the registered set.
 	metricsapi.Register(e)
-	initialization.Register(e, nil, nil, nil, nil, nil)
+	initialization.Register(e, nil, nil, nil, nil, nil, "")
 	authapi.Register(e, nil, nil, nil, nil, nil, nil, nil)
 	adminsettings.Register(e, nil, nil, nil, nil, nil, nil)
 	clusters.Register(e, nil, nil)

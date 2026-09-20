@@ -1,0 +1,26 @@
+services:
+  control-api:
+    environment:
+      APP_ENV: production
+      SESSION_COOKIE_SECURE: "true"
+  https:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    environment:
+      CONSOLE_DOMAIN: ${CONSOLE_DOMAIN:?set CONSOLE_DOMAIN to the public console hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - console-tls-data:/data
+      - console-tls-config:/config
+    # control-api has no healthcheck, so Caddy may start before the API is
+    # ready; requests during that window can return 502 until it is up.
+    depends_on:
+      - control-api
+
+volumes:
+  console-tls-data:
+  console-tls-config:

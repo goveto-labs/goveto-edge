@@ -13,6 +13,8 @@ type LiveFilter struct {
 }
 
 type LiveRequestLog struct {
+	Cursor        string    `json:"-"`
+	Gap           bool      `json:"-"`
 	EventTime     time.Time `json:"event_time"`
 	RequestID     string    `json:"request_id,omitempty"`
 	ClusterID     string    `json:"cluster_id"`
@@ -66,15 +68,9 @@ func (b *LiveBroker) Publish(events []WebRequestLog) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	for _, event := range events {
-		live := LiveRequestLog{
-			EventTime: event.EventTime, RequestID: event.RequestID, ClusterID: event.ClusterID,
-			NodeID: event.NodeID, SiteID: event.SiteID, ConfigVersion: event.ConfigVersion,
-			Hostname: event.Hostname, Method: event.Method, Path: event.Path,
-			StatusCode: event.StatusCode, DurationUS: uint64(event.Duration.Microseconds()),
-			CacheStatus: event.CacheStatus, WAFAction: event.WAFAction,
-		}
+		live := liveRequestLog(event)
 		for _, subscriber := range b.subscribers {
-			if !subscriber.filter.matches(event) {
+			if !subscriber.filter.matches(live) {
 				continue
 			}
 			select {
@@ -86,7 +82,17 @@ func (b *LiveBroker) Publish(events []WebRequestLog) {
 	}
 }
 
-func (f LiveFilter) matches(event WebRequestLog) bool {
+func liveRequestLog(event WebRequestLog) LiveRequestLog {
+	return LiveRequestLog{
+		EventTime: event.EventTime, RequestID: event.RequestID, ClusterID: event.ClusterID,
+		NodeID: event.NodeID, SiteID: event.SiteID, ConfigVersion: event.ConfigVersion,
+		Hostname: event.Hostname, Method: event.Method, Path: event.Path,
+		StatusCode: event.StatusCode, DurationUS: uint64(event.Duration.Microseconds()),
+		CacheStatus: event.CacheStatus, WAFAction: event.WAFAction,
+	}
+}
+
+func (f LiveFilter) matches(event LiveRequestLog) bool {
 	return (f.ClusterID == "" || f.ClusterID == event.ClusterID) &&
 		(f.SiteID == "" || f.SiteID == event.SiteID) &&
 		(f.NodeID == "" || f.NodeID == event.NodeID)

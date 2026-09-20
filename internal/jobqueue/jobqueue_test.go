@@ -120,6 +120,21 @@ func TestClaimInitializesDeadlineFromClaimTime(t *testing.T) {
 	}
 }
 
+func TestClaimPublishSiteGuardIgnoresCancellationRequestedJobs(t *testing.T) {
+	statement := claimSQL("publish_jobs")
+	if !strings.Contains(statement,
+		"older.status IN ('PENDING', 'RUNNING')") {
+		t.Fatalf("publish claim lost the per-site older version guard: %s", statement)
+	}
+	if !strings.Contains(statement, "older.cancel_requested_at IS NULL") {
+		t.Fatalf("publish site guard must ignore cancellation-requested jobs: %s", statement)
+	}
+	nonPublish := claimSQL("purge_jobs")
+	if strings.Contains(nonPublish, "older.") {
+		t.Fatalf("non-publish claim must not have a site guard: %s", nonPublish)
+	}
+}
+
 func TestSweepableJobPredicateProtectsActiveLeases(t *testing.T) {
 	want := "(status='PENDING' OR (status='RUNNING' AND (lease_until IS NULL OR lease_until<=NOW())))"
 	if sweepableJobPredicate != want {

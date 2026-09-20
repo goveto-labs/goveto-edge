@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,7 +44,21 @@ func Register(e *echo.Echo, db *client.Client, store *analytics.Store) {
 
 func liveLogs(s *analytics.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		ctx := c.Request().Context()
+		ctx, cancel := context.WithCancel(c.Request().Context())
+		defer cancel()
+		filter := analytics.LiveFilter{
+			ClusterID: c.Param("cluster_id"), SiteID: c.QueryParam("site_id"),
+			NodeID: c.QueryParam("node_id"),
+		}
+		events, err := s.SubscribeFrom(ctx, filter, 256, c.Request().Header.Get("Last-Event-ID"))
+		if errors.Is(err, analytics.ErrInvalidLiveCursor) {
+			// EventSource would reconnect forever with the same invalid
+			// Last-Event-ID; ignore the cursor and start from the latest event.
+			events, err = s.SubscribeFrom(ctx, filter, 256, "")
+		}
+		if err != nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "live logs unavailable")
+		}
 		response := c.Response()
 		response.Header().Set("Content-Type", "text/event-stream")
 		response.Header().Set("Cache-Control", "no-cache, no-transform")
@@ -51,10 +66,6 @@ func liveLogs(s *analytics.Store) echo.HandlerFunc {
 		response.Header().Set("X-Accel-Buffering", "no")
 		response.WriteHeader(http.StatusOK)
 
-		events := s.Subscribe(ctx, analytics.LiveFilter{
-			ClusterID: c.Param("cluster_id"), SiteID: c.QueryParam("site_id"),
-			NodeID: c.QueryParam("node_id"),
-		}, 256)
 		heartbeat := time.NewTicker(15 * time.Second)
 		defer heartbeat.Stop()
 		if _, err := fmt.Fprint(response, "event: ready\ndata: {}\n\n"); err != nil {
@@ -65,12 +76,26 @@ func liveLogs(s *analytics.Store) echo.HandlerFunc {
 			select {
 			case <-ctx.Done():
 				return nil
-			case event := <-events:
+			case event, ok := <-events:
+				if !ok {
+					return nil
+				}
+				if event.Gap {
+					if _, err := fmt.Fprint(response, "event: gap\ndata: {\"message\":\"Live retention exceeded; query historical logs for the missing interval.\"}\n\n"); err != nil {
+						return nil
+					}
+					_ = http.NewResponseController(response).Flush()
+					continue
+				}
 				encoded, err := json.Marshal(event)
 				if err != nil {
 					continue
 				}
-				if _, err := fmt.Fprintf(response, "event: access_log\ndata: %s\n\n", encoded); err != nil {
+				if event.Cursor != "" {
+					if _, err := fmt.Fprintf(response, "id: %s\nevent: access_log\ndata: %s\n\n", event.Cursor, encoded); err != nil {
+						return nil
+					}
+				} else if _, err := fmt.Fprintf(response, "event: access_log\ndata: %s\n\n", encoded); err != nil {
 					return nil
 				}
 				_ = http.NewResponseController(response).Flush()

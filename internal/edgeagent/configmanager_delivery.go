@@ -230,7 +230,30 @@ func deliveryCORSRoute(site SiteConfig, policy deliverypolicy.DeliveryPolicy) ma
 	}
 }
 
-func deliveryPoolRoutes(site SiteConfig, policy deliverypolicy.DeliveryPolicy, handlers []any, baseProxy map[string]any, originPolicy edgeprotocol.OriginPolicyConfig) ([]any, error) {
+func deliveryPoolRoutes(site SiteConfig, policy deliverypolicy.DeliveryPolicy, handlers []any, baseProxy map[string]any, originPolicy edgeprotocol.OriginPolicyConfig, originMetrics map[string]any, nodeConfig NodeConfig) ([]any, error) {
+	cachePolicy, cacheConfigured, err := decodeCachePolicy(site.Cache)
+	if err != nil {
+		return nil, err
+	}
+	chain := func(scope string, proxy map[string]any) []any {
+		origin := []any{originMetrics, proxy}
+		var routes []any
+		if cacheConfigured && !cachePolicy.DevMode {
+			for ruleIndex, rule := range cachePolicy.Rules {
+				cache := govetoCacheHandler(site.SiteID, cachePolicy, rule, nodeConfig)
+				// The selected pool/split is part of the key, even for a
+				// percentage split whose decision is not a request header.
+				cache["key_namespace"] = scope
+				routes = append(routes, map[string]any{
+					"@id":    "site_" + site.SiteID + "_delivery_" + scope + "_cache_" + strconv.Itoa(ruleIndex),
+					"match":  []any{govetoCacheMatcher(nil, cachePolicy, rule)},
+					"handle": append([]any{cache}, origin...), "terminal": true,
+				})
+			}
+		}
+		routes = append(routes, map[string]any{"handle": origin, "terminal": true})
+		return append(append([]any{}, handlers...), map[string]any{"handler": "subroute", "routes": routes})
+	}
 	pools := make(map[string]deliverypolicy.PathOriginPool, len(policy.OriginPools))
 	for _, pool := range policy.OriginPools {
 		pools[pool.Name] = pool
@@ -248,7 +271,7 @@ func deliveryPoolRoutes(site SiteConfig, policy deliverypolicy.DeliveryPolicy, h
 		}, "path": pool.Paths}
 		routes = append(routes, map[string]any{
 			"@id": "site_" + site.SiteID + "_split_" + strconv.Itoa(index), "match": []any{matched},
-			"handle": append(append([]any{}, handlers...), proxy), "terminal": true,
+			"handle": chain("split:"+split.Name, proxy), "terminal": true,
 		})
 	}
 	for index, pool := range policy.OriginPools {
@@ -259,7 +282,7 @@ func deliveryPoolRoutes(site SiteConfig, policy deliverypolicy.DeliveryPolicy, h
 		routes = append(routes, map[string]any{
 			"@id":    "site_" + site.SiteID + "_pool_" + strconv.Itoa(index),
 			"match":  []any{map[string]any{"host": site.Domains, "path": pool.Paths}},
-			"handle": append(append([]any{}, handlers...), proxy), "terminal": true,
+			"handle": chain("pool:"+pool.Name, proxy), "terminal": true,
 		})
 	}
 	return routes, nil

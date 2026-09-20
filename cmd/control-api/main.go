@@ -94,6 +94,15 @@ func main() {
 		slog.Error("read instance initialization status", "error", err)
 		os.Exit(1)
 	}
+	var initializationToken string
+	if !instanceInitialized {
+		initializationToken, err = config.InitializationToken(cfg.DataDir)
+		if err != nil {
+			slog.Error("prepare initialization token", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("initialization requires INIT_TOKEN or the token in GOVETO_DATA_DIR/secrets/initialization.token")
+	}
 	agentGatewayPublicAddress, addressConfigured, err := settingStore.AgentGatewayPublicAddress(ctx)
 	if err != nil {
 		slog.Error("read agent gateway public address", "error", err)
@@ -202,7 +211,8 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("analytics schema is up to date", "migrations_applied", migrationCount)
-	analyticsStore := analytics.NewStore(analyticsPool, cfg.AnalyticsQueryTimeout)
+	analyticsStore := analytics.NewStore(analyticsPool, cfg.AnalyticsQueryTimeout, redisClient)
+	defer analyticsStore.Close()
 	if err = analyticsStore.ConfigureRawRetention(ctx, cfg.AnalyticsRawRetentionDays); err != nil {
 		slog.Error("configure analytics retention", "error", err)
 		os.Exit(1)
@@ -442,6 +452,7 @@ func main() {
 				MaxHeaderCount: 100, HSTS: strings.EqualFold(cfg.AppEnv, "production"),
 				IPExtractor: ipExtractor,
 			},
+			initializationToken,
 			func() {
 				slog.Info("control plane restart requested after admin settings update")
 				stop()

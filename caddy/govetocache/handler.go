@@ -24,6 +24,7 @@ import (
 
 	"goveto-edge/caddy/simplefs"
 	"goveto-edge/internal/cacherange"
+	"goveto-edge/internal/httpconditional"
 	"goveto-edge/internal/policy"
 )
 
@@ -34,6 +35,9 @@ type Handler struct {
 	MaxSizeBytes            uint64         `json:"max_size_bytes"`
 	MaxDiskUsagePercent     int            `json:"max_disk_usage_percent"`
 	KeyParts                []string       `json:"key_parts"`
+	// KeyNamespace partitions keys sharing one storage. purgeKey deliberately
+	// ignores it, so a URL purge clears every namespace variant of that URL.
+	KeyNamespace            string         `json:"key_namespace,omitempty"`
 	KeyHeaders              []string       `json:"key_headers,omitempty"`
 	KeyQueryNormalize       bool           `json:"key_query_normalize,omitempty"`
 	KeyQueryInclude         []string       `json:"key_query_include,omitempty"`
@@ -105,7 +109,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	}
 	baseRaw := h.cacheKey(r, nil)
 	baseKey := h.storageKey(baseRaw)
-	fresh, stale, metadata := h.storage.LookupEntry(baseKey, r)
+	fresh, stale, metadata := h.storage.LookupEntryFull(baseKey, r)
 	applyRevalidatedHeaders(fresh, metadata.Headers)
 	applyRevalidatedHeaders(stale, metadata.Headers)
 	if fresh != nil {
@@ -136,7 +140,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 				return r.Context().Err()
 			case <-h.flightDone(baseKey):
 			}
-			fresh, _, metadata = h.storage.LookupEntry(baseKey, r)
+			fresh, _, metadata = h.storage.LookupEntryFull(baseKey, r)
 			applyRevalidatedHeaders(fresh, metadata.Headers)
 			if fresh != nil {
 				if stale != nil {
@@ -193,6 +197,7 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 	if stale != nil {
 		originRequest = originRequest.Clone(originRequest.Context())
 		originRequest.Header = originRequest.Header.Clone()
+		clearClientPreconditions(originRequest.Header)
 		if etag := stale.Header.Get("ETag"); etag != "" {
 			originRequest.Header.Set("If-None-Match", etag)
 		} else if modified := stale.Header.Get("Last-Modified"); modified != "" {
@@ -207,20 +212,33 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 		return next.ServeHTTP(w, request)
 	}
 	defer captured.Close()
+	captured.configureCapture(h, baseRaw)
+	captured.clientRequest = request
 	_, ranged := cacherange.FromContext(request.Context())
 	if stale == nil && !ranged {
 		captured.enableStreaming(func(header http.Header, status int) {
 			h.prepareResponse(header, status)
 			size := declaredResponseSize(header)
 			varied, varyOK := h.variedHeaders(request, header)
-			if h.cacheable(request, status, header, size) && varyOK {
+			cacheable := h.cacheable(request, status, header, size) && varyOK
+			if cacheable {
 				h.setResultHeaders(header, "MISS", baseRaw, h.ttl(status))
-				if originRequest.Method != http.MethodHead && status != http.StatusNoContent &&
-					size > 0 && !hasDeclaredTrailer(header) {
-					captured.startEncode(h, request, header, status, size, baseKey, varied)
-				}
 			} else {
 				h.setResultHeaders(header, "BYPASS", baseRaw, 0)
+			}
+			if conditional := httpconditional.Status(request, &http.Response{StatusCode: status, Header: header}); conditional != 0 {
+				captured.responseStatus = conditional
+				captured.suppressBody = true
+				header.Del("Content-Length")
+				header.Del("Content-Range")
+				captured.discardCapture()
+				return
+			}
+			if cacheable && originRequest.Method != http.MethodHead && status != http.StatusNoContent &&
+				size > 0 && !hasDeclaredTrailer(header) {
+				captured.startEncode(h, request, header, status, size, baseKey, varied)
+			} else if !cacheable {
+				captured.discardCapture()
 			}
 		})
 	}
@@ -230,8 +248,8 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 	if captured.encode != nil {
 		return h.finishStreamEncode(w, request, captured, stale, metadata, baseRaw, err, incomplete)
 	}
-	if err != nil || incomplete || staleEligibleStatus(status) {
-		if stale != nil && withinStaleWindow(metadata.FreshUntil, h.StaleIfErrorTTL) {
+	if err != nil || captured.captureErr != nil || incomplete || staleEligibleStatus(status) {
+		if stale != nil && !captured.isStreamed() && withinStaleWindow(metadata.FreshUntil, h.StaleIfErrorTTL) {
 			return h.serveCached(w, stale, "STALE", baseRaw, metadata)
 		}
 		if stale != nil {
@@ -257,6 +275,19 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 	}
 	if stale != nil {
 		_ = stale.Body.Close()
+	}
+	if captured.discarded {
+		if stale != nil {
+			// Match the background refresh policy: a transient capacity
+			// shortfall must not evict the stale fallback entry. Drop it only
+			// when the rejected origin response is itself not cacheable.
+			_, varyOK := h.variedHeaders(request, captured.Header())
+			if !h.cacheable(request, status, captured.Header(), captured.rejectedSize) || !varyOK {
+				h.storage.DeleteEntry(baseKey)
+			}
+		}
+		captured.forwardTrailers()
+		return captured.WriteResponse(w)
 	}
 	h.prepareResponse(captured.Header(), status)
 	varied, varyOK := h.variedHeaders(request, captured.Header())
@@ -284,7 +315,7 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 		h.setResultHeaders(captured.Header(), "MISS", baseRaw, h.ttl(status))
 	}
 	if _, ranged := cacherange.FromContext(request.Context()); ranged && err == nil {
-		fresh, _, storedMetadata := h.storage.LookupEntry(baseKey, request)
+		fresh, _, storedMetadata := h.storage.LookupEntryFull(baseKey, request)
 		if fresh != nil {
 			return h.serveCached(w, fresh, "MISS", baseRaw, storedMetadata)
 		}
@@ -341,7 +372,7 @@ func declaredResponseSize(header http.Header) uint64 {
 func (h *Handler) refresh(request *http.Request, next caddyhttp.Handler, baseRaw, baseKey string) {
 	lookupRequest := request.Clone(context.Background())
 	lookupRequest.Header = request.Header.Clone()
-	_, stale, metadata := h.storage.LookupEntry(baseKey, lookupRequest)
+	_, stale, metadata := h.storage.LookupEntryFull(baseKey, lookupRequest)
 	applyRevalidatedHeaders(stale, metadata.Headers)
 	if stale == nil {
 		return
@@ -349,6 +380,8 @@ func (h *Handler) refresh(request *http.Request, next caddyhttp.Handler, baseRaw
 	defer stale.Body.Close()
 	originRequest := request.Clone(request.Context())
 	originRequest.Header = request.Header.Clone()
+	clearClientPreconditions(originRequest.Header)
+	originRequest.Header.Del("Range")
 	if etag := stale.Header.Get("ETag"); etag != "" {
 		originRequest.Header.Set("If-None-Match", etag)
 	} else if modified := stale.Header.Get("Last-Modified"); modified != "" {
@@ -359,7 +392,14 @@ func (h *Handler) refresh(request *http.Request, next caddyhttp.Handler, baseRaw
 		return
 	}
 	defer captured.Close()
-	if err := callNext(captured, originRequest, next); err != nil || responseIncomplete(originRequest.Method, captured.Status(), captured.Header(), captured.Size()) || staleEligibleStatus(captured.Status()) {
+	captured.configureCapture(h, baseRaw)
+	if err := callNext(captured, originRequest, next); err != nil || captured.captureErr != nil || responseIncomplete(originRequest.Method, captured.Status(), captured.Header(), captured.Size()) || staleEligibleStatus(captured.Status()) {
+		if errors.Is(captured.captureErr, errCaptureLimit) {
+			_, varyOK := h.variedHeaders(request, captured.Header())
+			if !h.cacheable(request, captured.Status(), captured.Header(), captured.rejectedSize) || !varyOK {
+				h.storage.DeleteEntry(baseKey)
+			}
+		}
 		return
 	}
 	if captured.Status() == http.StatusNotModified {
@@ -439,6 +479,17 @@ func varyNamesEqual(a, b http.Header) bool {
 
 func (h *Handler) serveCached(w http.ResponseWriter, response *http.Response, result, key string, metadata ...simplefs.LookupMetadata) error {
 	defer response.Body.Close()
+	if status := httpconditional.Status(response.Request, response); status != 0 {
+		response.StatusCode = status
+		response.Header.Del("Content-Length")
+		response.Header.Del("Content-Range")
+	} else if response.Request != nil && response.Request.Method != http.MethodHead {
+		if spec, ranged := cacherange.FromContext(response.Request.Context()); ranged && httpconditional.RangeAllowed(response.Request, response.Header) {
+			if err := simplefs.ApplyRange(response, spec); err != nil {
+				return err
+			}
+		}
+	}
 	header := response.Header
 	if h.SurrogateKeyHeader != "" && !strings.EqualFold(h.SurrogateKeyHeader, "Surrogate-Key") {
 		header.Del("Surrogate-Key")
@@ -455,6 +506,9 @@ func (h *Handler) serveCached(w http.ResponseWriter, response *http.Response, re
 	h.setResultHeaders(header, result, key, ttl)
 	transferHeader(w.Header(), header)
 	w.WriteHeader(response.StatusCode)
+	if response.StatusCode == http.StatusNotModified || response.StatusCode == http.StatusPreconditionFailed || (response.Request != nil && response.Request.Method == http.MethodHead) {
+		return nil
+	}
 	if response.Body != http.NoBody {
 		_, err := io.Copy(w, response.Body)
 		return err
@@ -558,6 +612,12 @@ func (h *Handler) variedHeaders(request *http.Request, response http.Header) (ht
 func (h *Handler) cacheKey(request *http.Request, varied http.Header) string {
 	var key strings.Builder
 	appendField(&key, "site", h.SiteID)
+	if h.KeyNamespace != "" {
+		// The in-key field name "origin-route" predates the key_namespace
+		// config name; both denote the same namespace token. Keep the wire
+		// name stable so existing cache entries remain addressable.
+		appendField(&key, "origin-route", h.KeyNamespace)
+	}
 	for _, part := range h.KeyParts {
 		switch part {
 		case policy.CacheKeyPartMethod:
@@ -673,7 +733,7 @@ func normalizeQuery(raw string, sorted bool, include, exclude []string) string {
 			}
 			builder.WriteString(url.QueryEscape(pair.key))
 			builder.WriteByte('=')
-			builder.WriteString(pair.value)
+			builder.WriteString(url.QueryEscape(pair.value))
 		}
 		return builder.String()
 	}
@@ -738,6 +798,9 @@ func matchAnyParam(name string, patterns []string) bool {
 	return false
 }
 
+// purgeKey intentionally omits the site ID and key namespace that cacheKey
+// embeds: purging by URL is meant to invalidate that URL across every
+// namespace and variant stored under it, not just one namespaced entry.
 func purgeKey(request *http.Request) string {
 	scheme := request.URL.Scheme
 	if scheme == "" {
@@ -986,32 +1049,52 @@ func sortStrings(values []string) {
 }
 
 type capturedResponse struct {
-	header        http.Header
-	status        int
-	size          int64
-	file          *os.File
-	path          string
-	downstream    http.ResponseWriter
-	wroteHeader   bool
-	wrote1xx      bool
-	streamed      bool
-	stream        func(http.Header, int)
-	captureErr    error
-	downstreamErr error
-	encode        *encodeSession
+	clientRequest  *http.Request
+	storage        *simplefs.Storage
+	limit          uint64
+	reserved       uint64
+	rejectedSize   uint64
+	declaredSize   uint64
+	discarded      bool
+	bypass         func(http.Header, int)
+	releaseSlot    func()
+	header         http.Header
+	status         int
+	responseStatus int
+	size           int64
+	file           *os.File
+	path           string
+	downstream     http.ResponseWriter
+	wroteHeader    bool
+	wrote1xx       bool
+	streamed       bool
+	suppressBody   bool
+	stream         func(http.Header, int)
+	captureErr     error
+	downstreamErr  error
+	encode         *encodeSession
+	encodeDone     <-chan struct{}
 }
 
 func newCapturedResponse(directory string, downstream http.ResponseWriter) (*capturedResponse, error) {
+	select {
+	case captureSlots <- struct{}{}:
+	default:
+		return nil, errCaptureLimit
+	}
+	release := func() { <-captureSlots }
 	file, err := os.CreateTemp(directory, ".goveto-origin-*")
 	if err != nil {
+		release()
 		return nil, err
 	}
 	if err = file.Chmod(0o640); err != nil {
 		_ = file.Close()
 		_ = os.Remove(file.Name())
+		release()
 		return nil, err
 	}
-	return &capturedResponse{header: http.Header{}, file: file, path: file.Name(), downstream: downstream}, nil
+	return &capturedResponse{header: http.Header{}, file: file, path: file.Name(), downstream: downstream, releaseSlot: release}, nil
 }
 
 func (w *capturedResponse) Header() http.Header { return w.header }
@@ -1030,9 +1113,15 @@ func (w *capturedResponse) WriteHeader(status int) {
 	}
 	w.wroteHeader = true
 	w.status = status
+	// Cache the declared length once headers are final so per-chunk Write
+	// calls do not re-parse Content-Length on the hot path.
+	w.declaredSize = declaredResponseSize(w.header)
 	if w.stream != nil && w.downstream != nil {
 		w.stream(w.header, status)
 		transferHeader(w.downstream.Header(), w.header)
+		if w.responseStatus != 0 {
+			status = w.responseStatus
+		}
 		w.downstream.WriteHeader(status)
 		w.streamed = true
 	}
@@ -1062,19 +1151,40 @@ func (w *capturedResponse) Write(value []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 	if w.encode != nil {
-		w.encode.tryWrite(value)
+		if total := uint64(w.size) + uint64(len(value)); (w.limit > 0 && total > w.limit) || total > w.declaredSize {
+			// Same once-per-session rejection accounting as dropQueueFull.
+			if !w.encode.isDropped() {
+				w.storage.RecordStreamEncodeDrop()
+			}
+			w.encode.drop()
+		} else {
+			w.encode.tryWrite(value)
+		}
 		w.size += int64(len(value))
-	} else {
-		count, err := w.file.Write(value)
-		w.size += int64(count)
-		if err != nil {
-			w.captureErr = err
-			if !w.streamed {
-				return count, err
+	} else if !w.discarded {
+		total := uint64(w.size) + uint64(len(value))
+		if (w.limit > 0 && (total > w.limit || w.declaredSize > w.limit)) || !w.reserveCapture(total) {
+			w.rejectedSize = max(total, w.declaredSize)
+			if err := w.stopCapture(); err != nil {
+				return 0, err
 			}
 		}
+		if !w.discarded {
+			count, err := w.file.Write(value)
+			w.size += int64(count)
+			if err != nil {
+				w.captureErr = err
+				if !w.streamed {
+					return count, err
+				}
+			}
+		} else {
+			w.size += int64(len(value))
+		}
+	} else {
+		w.size += int64(len(value))
 	}
-	if w.streamed && w.downstream != nil {
+	if w.streamed && !w.suppressBody && w.downstream != nil {
 		if _, err := w.downstream.Write(value); err != nil {
 			w.downstreamErr = err
 		}
@@ -1135,6 +1245,13 @@ func (w *capturedResponse) WriteResponse(target http.ResponseWriter) error {
 	if w.streamed {
 		return w.downstreamErr
 	}
+	if status := httpconditional.Status(w.clientRequest, &http.Response{StatusCode: w.Status(), Header: w.header}); status != 0 {
+		w.header.Del("Content-Length")
+		w.header.Del("Content-Range")
+		transferHeader(target.Header(), w.header)
+		target.WriteHeader(status)
+		return nil
+	}
 	if _, err := w.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
@@ -1146,8 +1263,31 @@ func (w *capturedResponse) WriteResponse(target http.ResponseWriter) error {
 
 func (w *capturedResponse) Close() error {
 	w.abandonEncode()
-	err := w.file.Close()
-	return errors.Join(err, os.Remove(w.path))
+	if w.encodeDone != nil {
+		select {
+		case <-w.encodeDone:
+		default:
+			// A slow encoder may outlive bounded request cleanup. Keep its
+			// capacity and concurrency reservation until its file is removed.
+			reserved, storage, release, done := w.reserved, w.storage, w.releaseSlot, w.encodeDone
+			w.reserved, w.releaseSlot = 0, nil
+			go func() {
+				<-done
+				if storage != nil {
+					storage.ReleaseCapture(reserved)
+				}
+				if release != nil {
+					release()
+				}
+			}()
+		}
+	}
+	w.discardCapture()
+	if w.releaseSlot != nil {
+		w.releaseSlot()
+		w.releaseSlot = nil
+	}
+	return nil
 }
 
 var (
