@@ -241,6 +241,22 @@ func ValidConfigStatusValues() []ConfigStatus {
 	}
 }
 
+// DNSPlacement represents the DNSPlacement enum type.
+type DNSPlacement string
+
+const (
+	DNSPlacementALL            DNSPlacement = "ALL"
+	DNSPlacementPRIMARY_BACKUP DNSPlacement = "PRIMARY_BACKUP"
+)
+
+// ValidDNSPlacementValues returns all valid values for the DNSPlacement enum.
+func ValidDNSPlacementValues() []DNSPlacement {
+	return []DNSPlacement{
+		DNSPlacementALL,
+		DNSPlacementPRIMARY_BACKUP,
+	}
+}
+
 // DNSProviderKind represents the DNSProviderKind enum type.
 type DNSProviderKind string
 
@@ -270,22 +286,6 @@ func ValidDNSProviderTypeValues() []DNSProviderType {
 	return []DNSProviderType{
 		DNSProviderTypeALIYUN,
 		DNSProviderTypeCLOUDFLARE,
-	}
-}
-
-// DNSPlacement represents the DNSPlacement enum type.
-type DNSPlacement string
-
-const (
-	DNSPlacementALL            DNSPlacement = "ALL"
-	DNSPlacementPRIMARY_BACKUP DNSPlacement = "PRIMARY_BACKUP"
-)
-
-// ValidDNSPlacementValues returns all valid values for the DNSPlacement enum.
-func ValidDNSPlacementValues() []DNSPlacement {
-	return []DNSPlacement{
-		DNSPlacementALL,
-		DNSPlacementPRIMARY_BACKUP,
 	}
 }
 
