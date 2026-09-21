@@ -108,9 +108,9 @@ export default function Login() {
     };
 
     return (
-        <div className='grid h-[100%] bg-background text-foreground'>
+        <div className='grid h-full bg-background text-foreground'>
             <main className='relative flex flex-col justify-center overflow-hidden bg-background px-6 py-12 sm:px-10 lg:px-16'>
-                <div className='mx-auto w-full max-w-[380px]'>
+                <div className='mx-auto w-full max-w-95'>
                     <div className='mb-10 flex items-center gap-2.5 lg:hidden'>
                         <div className='flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-accent-foreground'>
                             <Globe aria-hidden='true' className='h-4 w-4' />
@@ -131,7 +131,7 @@ export default function Login() {
 
                     {(error || authError) && (
                         <div
-                            className='mb-5 rounded-xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger-foreground'
+                            className='mb-5 rounded-xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger'
                             role='alert'
                         >
                             {error || authError}
