@@ -127,7 +127,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Install gco
-        run: go install github.com/arsfy/gcorm/cmd/gco@v0.1.12
+        run: go install github.com/arsfy/gcorm/cmd/gco@v0.1.13
       - name: Validate schema
         run: gco validate --schema schema/schema.gcorm
       - name: Check generated code is up to date

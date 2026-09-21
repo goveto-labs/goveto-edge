@@ -198,7 +198,7 @@ func TestApplyHTTPConfigProxiesMatchedHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.Host = "site.example.test"
-	response, err := http.DefaultClient.Do(request)
+	response, err := edgeTestClient.Do(request)
 	if err != nil {
 		t.Fatalf("request site: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestApplyHTTPConfigProxiesMatchedHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	unmatched.Host = "unknown.example.test"
-	unmatchedResponse, err := http.DefaultClient.Do(unmatched)
+	unmatchedResponse, err := edgeTestClient.Do(unmatched)
 	if err != nil {
 		t.Fatalf("request unmatched host: %v", err)
 	}
@@ -824,7 +824,7 @@ func TestApplySiteUsesPerOriginHostHeaders(t *testing.T) {
 	for range 4 {
 		request, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
 		request.Host = "hosts.example.test"
-		response, err := http.DefaultClient.Do(request)
+		response, err := edgeTestClient.Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}

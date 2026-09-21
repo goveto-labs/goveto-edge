@@ -66,7 +66,7 @@ func TestAgentHTTPSOriginUsesSNIPrivateCAAndMTLS(t *testing.T) {
 	defer manager.Stop()
 	request, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
 	request.Host = "private.example.test"
-	response, err := http.DefaultClient.Do(request)
+	response, err := edgeTestClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func TestAgentEnforcesTotalOriginTimeout(t *testing.T) {
 	request, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
 	request.Host = "timeout.example.test"
 	start := time.Now()
-	response, err := http.DefaultClient.Do(request)
+	response, err := edgeTestClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +435,7 @@ func requestOriginSiteMethod(t *testing.T, port int, method string) (string, int
 	t.Helper()
 	request, _ := http.NewRequest(method, "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
 	request.Host = "governance.example.test"
-	response, err := http.DefaultClient.Do(request)
+	response, err := edgeTestClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}

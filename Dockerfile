@@ -4,7 +4,7 @@
 # edge-agent architectures are embedded into the binary, matching what
 # script/build_control.sh produces locally and in CI.
 
-ARG GO_VERSION=1.26.5
+ARG GO_VERSION=1.27.0
 ARG NODE_VERSION=24
 ARG GOVETO_VERSION=dev
 

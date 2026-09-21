@@ -45,14 +45,32 @@ export default function FaviconIcon({ className, style, ...rest }: SVGProps<SVGS
             <path d={starPath} style={strokeStyle} />
             <g>
                 <line x1='36' y1='36' x2='36' y2='36' style={secondaryStrokeStyle} />
-                <line x1='32.92' y1='40.24' x2='28.3' y2='46.6' style={secondaryDashedStrokeStyle} />
+                <line
+                    x1='32.92'
+                    y1='40.24'
+                    x2='28.3'
+                    y2='46.6'
+                    style={secondaryDashedStrokeStyle}
+                />
                 <line x1='26.76' y1='48.72' x2='26.76' y2='48.72' style={secondaryStrokeStyle} />
             </g>
             <g>
                 <line x1='50.95' y1='31.14' x2='50.95' y2='31.14' style={secondaryStrokeStyle} />
-                <line x1='45.97' y1='32.76' x2='38.49' y2='35.19' style={secondaryDashedStrokeStyle} />
+                <line
+                    x1='45.97'
+                    y1='32.76'
+                    x2='38.49'
+                    y2='35.19'
+                    style={secondaryDashedStrokeStyle}
+                />
                 <line x1='36' y1='36' x2='36' y2='36' style={secondaryStrokeStyle} />
-                <line x1='39.08' y1='40.24' x2='43.7' y2='46.6' style={secondaryDashedStrokeStyle} />
+                <line
+                    x1='39.08'
+                    y1='40.24'
+                    x2='43.7'
+                    y2='46.6'
+                    style={secondaryDashedStrokeStyle}
+                />
                 <line x1='45.24' y1='48.72' x2='45.24' y2='48.72' style={secondaryStrokeStyle} />
             </g>
             <g>
@@ -62,7 +80,13 @@ export default function FaviconIcon({ className, style, ...rest }: SVGProps<SVGS
             </g>
             <g>
                 <line x1='21.05' y1='31.14' x2='21.05' y2='31.14' style={secondaryStrokeStyle} />
-                <line x1='26.03' y1='32.76' x2='33.51' y2='35.19' style={secondaryDashedStrokeStyle} />
+                <line
+                    x1='26.03'
+                    y1='32.76'
+                    x2='33.51'
+                    y2='35.19'
+                    style={secondaryDashedStrokeStyle}
+                />
                 <line x1='36' y1='36' x2='36' y2='36' style={secondaryStrokeStyle} />
             </g>
         </svg>

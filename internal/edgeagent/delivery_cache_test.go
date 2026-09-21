@@ -41,7 +41,7 @@ func TestDeliveryPoolsAndSplitsUseIsolatedCaches(t *testing.T) {
 	if err := manager.ApplySite(config); err != nil {
 		t.Fatal(err)
 	}
-	client := &http.Client{}
+	client := edgeTestClient
 	for _, group := range []struct {
 		canary bool
 		body   string
@@ -104,7 +104,7 @@ func TestDeliveryPercentageSplitUsesIsolatedCache(t *testing.T) {
 	// header, so both groups share the same URL; only key_namespace keeps the
 	// split and pool caches from serving each other's entries.
 	salt := config.SiteID + ":" + delivery.Splits[0].Name
-	client := &http.Client{}
+	client := edgeTestClient
 	for _, group := range []struct {
 		agent string
 		body  string

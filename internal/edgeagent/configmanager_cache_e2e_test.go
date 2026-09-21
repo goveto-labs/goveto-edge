@@ -318,7 +318,7 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 					return
 				}
 				request.Host = config.Domains[0]
-				response, err := http.DefaultClient.Do(request)
+				response, err := edgeTestClient.Do(request)
 				if err == nil {
 					_, err = io.Copy(io.Discard, response.Body)
 					_ = response.Body.Close()
@@ -473,7 +473,7 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 					if requestErr == nil {
 						request.Host = config.Domains[0]
 						var response *http.Response
-						response, requestErr = http.DefaultClient.Do(request)
+						response, requestErr = edgeTestClient.Do(request)
 						if requestErr == nil {
 							_, requestErr = io.Copy(io.Discard, response.Body)
 							requestErr = errors.Join(requestErr, response.Body.Close())
@@ -931,6 +931,11 @@ type edgeResponse struct {
 	header http.Header
 }
 
+// edgeTestClient disables keep-alive reuse: ApplySite reloads Caddy, which
+// severs idle connections and would otherwise surface as spurious
+// "connection reset by peer" failures on the next request.
+var edgeTestClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+
 func requestEdge(t *testing.T, port int, host, method, path string, headers http.Header) edgeResponse {
 	t.Helper()
 	request, err := http.NewRequest(method, "http://127.0.0.1:"+strconv.Itoa(port)+path, nil)
@@ -939,7 +944,7 @@ func requestEdge(t *testing.T, port int, host, method, path string, headers http
 	}
 	request.Host = host
 	request.Header = headers.Clone()
-	response, err := http.DefaultClient.Do(request)
+	response, err := edgeTestClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -959,7 +964,7 @@ func requestEdgeExpectReadError(t *testing.T, port int, host, path string) {
 		t.Fatal(err)
 	}
 	request.Host = host
-	response, err := http.DefaultClient.Do(request)
+	response, err := edgeTestClient.Do(request)
 	if err != nil {
 		return
 	}
