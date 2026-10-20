@@ -39,7 +39,7 @@ export function DialogShell({
                     size={size as 'sm' | 'md' | 'lg' | 'cover' | 'full' | 'xs' | undefined}
                 >
                     <Modal.Dialog
-                        className={`overflow-hidden rounded-2xl border border-border bg-surface p-0 shadow-xl [overscroll-behavior:contain] ${size === 'xl' ? 'mx-4 max-w-5xl sm:mx-6' : ''}`}
+                        className={`overflow-hidden rounded-2xl border border-border bg-surface p-0 shadow-xl overscroll-contain ${size === 'xl' ? 'mx-4 max-w-5xl sm:mx-6' : ''}`}
                     >
                         <div className='flex items-start justify-between border-b border-border bg-surface-secondary/50 px-6 py-4'>
                             <div className='flex min-w-0 flex-1 items-center gap-3'>
