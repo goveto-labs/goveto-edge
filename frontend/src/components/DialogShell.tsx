@@ -42,13 +42,13 @@ export function DialogShell({
                         className={`overflow-hidden rounded-2xl border border-border bg-surface p-0 shadow-xl [overscroll-behavior:contain] ${size === 'xl' ? 'mx-4 max-w-5xl sm:mx-6' : ''}`}
                     >
                         <div className='flex items-start justify-between border-b border-border bg-surface-secondary/50 px-6 py-4'>
-                            <div className='flex items-center gap-3'>
+                            <div className='flex min-w-0 flex-1 items-center gap-3'>
                                 {icon && (
-                                    <div className='flex h-9 w-9 items-center justify-center rounded-lg bg-surface text-muted'>
+                                    <div className='flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface text-muted'>
                                         {icon}
                                     </div>
                                 )}
-                                <div>
+                                <div className='min-w-0'>
                                     <Modal.Heading className='text-lg font-semibold'>
                                         {title}
                                     </Modal.Heading>

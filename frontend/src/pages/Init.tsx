@@ -79,7 +79,7 @@ export default function Init() {
                         <FormField
                             htmlFor='init-token'
                             label='Initialization token'
-                            hint='Use the setup token supplied by the instance operator.'
+                            hint='Use the setup token supplied by the {DATA}/secrets/initialization.token'
                             required
                         >
                             <Input

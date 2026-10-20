@@ -158,7 +158,7 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate
     return (
         <nav
             aria-label='Primary'
-            className={`flex-1 space-y-1 overflow-y-auto p-3 ${collapsed ? 'px-2' : ''}`}
+            className={`flex-1 space-y-1 overflow-y-auto p-3 scrollbar-none ${collapsed ? 'px-2' : ''}`}
         >
             {visibleNav.map((item) => {
                 const activeChild =

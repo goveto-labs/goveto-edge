@@ -40,7 +40,7 @@ interface FormErrorProps {
 export function FormError({ message, className = '' }: FormErrorProps) {
     return (
         <div
-            className={`rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger-foreground ${className}`}
+            className={`rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger ${className}`}
             role='alert'
         >
             {message}
